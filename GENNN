@@ -1,0 +1,126 @@
+import tensorflow as tf
+from tensorflow.keras.layers import Dense, Reshape, Flatten, LeakyReLU #type:ignore
+from tensorflow.keras.models import Sequential #type:ignore
+from tensorflow.keras.optimizers import Adam #type:ignore 
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Cargar el conjunto de datos MNIST
+(X_train, _), (_, _) = tf.keras.datasets.mnist.load_data()
+X_train = (X_train - 127.5) / 127.5  # Normalizar los datos al rango [-1, 1]
+X_train = X_train.reshape(-1, 28, 28, 1)  # Cambiar la forma para la red neuronal
+
+# Parámetros
+latent_dim = 100  # Dimensión del espacio latente (entrada del generador)
+batch_size = 64
+epochs = 10000
+save_interval = 10
+
+# Crear el modelo generador
+def build_generator():
+    model = Sequential()
+    model.add(Dense(8,input_dim=latent_dim))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(16))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(32))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(64))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(128))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(256))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(512))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(1024))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(2048))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(28 * 28 * 1, activation='tanh'))
+    model.add(Reshape((28, 28, 1)))
+    return model
+
+# Crear el modelo discriminador
+def build_discriminator():
+    model = Sequential()
+    model.add(Flatten(input_shape=(28, 28, 1)))  
+    model.add(Dense(2048))
+    model.add(LeakyReLU(alpha=0.2))    
+    model.add(Dense(1024))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(512))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(256))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(128))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(64))
+    model.add(LeakyReLU(alpha=0.2))
+    model.add(Dense(32))
+    model.add(LeakyReLU(alpha=0.2)) 
+    model.add(Dense(16))
+    model.add(LeakyReLU(alpha=0.2))  
+    model.add(Dense(8))
+    model.add(LeakyReLU(alpha=0.2))        
+    model.add(Dense(1, activation='sigmoid'))
+    return model
+
+# Compilar los modelos
+generator = build_generator()
+discriminator = build_discriminator()
+discriminator.compile(loss='binary_crossentropy', optimizer=Adam(0.0002, 0.5), metrics=['accuracy'])
+
+# Crear y compilar la GAN
+discriminator.trainable = False
+gan_input = tf.keras.Input(shape=(latent_dim,))
+gan_output = discriminator(generator(gan_input))
+gan = tf.keras.Model(gan_input, gan_output)
+gan.compile(loss='binary_crossentropy', optimizer=Adam(0.0002, 0.5))
+
+# Función para entrenar la GAN
+def train_gan(epochs, batch_size, save_interval):
+    for epoch in range(epochs):
+        # Entrenar el discriminador
+        idx = np.random.randint(0, X_train.shape[0], batch_size)
+        real_images = X_train[idx]
+
+        noise = np.random.normal(0, 1, (batch_size, latent_dim))
+        generated_images = generator.predict(noise)
+
+        real_labels = np.ones((batch_size, 1))
+        fake_labels = np.zeros((batch_size, 1))
+
+        d_loss_real = discriminator.train_on_batch(real_images, real_labels)
+        d_loss_fake = discriminator.train_on_batch(generated_images, fake_labels)
+        d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+
+        # Entrenar el generador
+        noise = np.random.normal(0, 1, (batch_size, latent_dim))
+        valid_labels = np.ones((batch_size, 1))
+        g_loss = gan.train_on_batch(noise, valid_labels)
+
+        # Mostrar el progreso
+        print(f"{epoch + 1}/{epochs} [D loss: {d_loss[0]:.4f}, acc.: {100 * d_loss[1]:.2f}%] [G loss: {g_loss}]")
+
+        # Guardar imágenes generadas a intervalos específicos
+        if (epoch + 1) % save_interval == 0:
+            save_generated_images(epoch + 1)
+
+# Función para guardar imágenes generadas
+def save_generated_images(epoch, examples=10, dim=(1, 10), figsize=(10, 1)):
+    noise = np.random.normal(0, 1, (examples, latent_dim))
+    generated_images = generator.predict(noise)
+    generated_images = 0.5 * generated_images + 0.5  # Reescalar a [0, 1]
+
+    plt.figure(figsize=figsize)
+    for i in range(examples):
+        plt.subplot(dim[0], dim[1], i + 1)
+        plt.imshow(generated_images[i, :, :, 0], cmap='gray')
+        plt.axis('off')
+    plt.tight_layout()
+    plt.savefig(f"generated_image_{epoch}.png")
+    plt.close()
+
+# Entrenar la GAN
+train_gan(epochs, batch_size, save_interval)
